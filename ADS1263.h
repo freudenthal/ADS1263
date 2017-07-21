@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <SPI.h>
 
+typedef void ( *NewSampleListener )();
+
 class ADS1263
 {
 	public:
@@ -90,7 +92,7 @@ class ADS1263
 			IDAC = 5, //R/W IDAC rotation enabled, disabled by default
 			RUNMODE = 6, //R/W High for pulse conversion, low for continous, continous by default
 			REFREV = 7, //R/W Normal polarity of reference multiplexer, high to reverse, normal by default
-		}
+		};
 		enum class DelayValue : uint8_t //Delay settings
 		{
 			NODELAY = 0,
@@ -164,6 +166,7 @@ class ADS1263
 			V8V = 3, // 8V/V, 8x gain
 			V16V = 4,
 			V32V = 5,
+			Count = 6,
 		};
 		enum class InputMUXRegMap : uint8_t
 		{
@@ -213,7 +216,7 @@ class ADS1263
 		{
 			MAG1 = 0, //R/W, 4 bits, Selects the current magnitude for IDAC1, defaults to zero
 			MAG2 = 4, //R/W, 4 bits, Selects the current magnitude for IDAC2, defaults to zero
-		}
+		};
 		enum class IDACMAGValue : uint8_t //4 bit values for IDACMAGRegMap MAG1 and MAG2
 		{
 			uA0 = 0,
@@ -232,10 +235,10 @@ class ADS1263
 		{
 			RMUXN = 0, //R/W, 3 bits, reference negative input, default to internal 2.5V negative
 			RMUXP = 3, //R/W, 3 bits, reference positive input, default to internal 2.5V positive
-		}
+		};
 		enum class REFMUXValue : uint8_t //3 bit values for REFMUXRegMap RMUXN and RMUXP
 		{
-			INTERNAL = 0, //Internal 2.5V positive/negative reference
+			INT2V5 = 0, //Internal 2.5V positive/negative reference
 			EXTAIN01 = 1, //External, use AIN0 for positive, AIN1 for negative
 			EXTAIN23 = 2, //External, use AIN2 for positive, AIN3 for negative
 			EXTAIN45 = 3, //External, use AIN4 for positive, AIN5 for negative
@@ -307,6 +310,7 @@ class ADS1263
 			V32V = 5,
 			V64V = 6,
 			V128V = 7,
+			Count = 8,
 		};
 		enum class ADC2DataRateValue : uint8_t
 		{
@@ -317,7 +321,7 @@ class ADS1263
 		};
 		enum class ADC2Reference : uint8_t
 		{
-			INTERNAL = 0, //Set to 2.5V reference
+			INT2V5 = 0, //Set to 2.5V reference
 			AIN01 = 1, //Set positive reference to AIN0 and negative to AIN1
 			AIN23 = 2, //Same as above for AIN2 and AIN3
 			AIN45 = 3, //Same as above for AIN4 and AIN5
@@ -328,87 +332,115 @@ class ADS1263
 			MUXN2 = 0, //R/W, 4 bits, select negative input for ADC2, defaults to AIN1
 			MUXP2 = 4, //R/W, 4 bits, select positive input for ADC2, defaults to AIN0
 		};
+		union uint8_tToint
+		{
+			uint8_t array[4];
+			int32_t integer;
+		};
+		struct ADC1SampeTimeForRate
+		{
+			ADC1DataRateValue Rate;
+			int32_t Micros;
+		};
+		struct ADC2SampeTimeForRate
+		{
+			ADC2DataRateValue Rate;
+			int32_t Micros;
+		};
 		struct PowerRegister
 		{
-			bool VBias,
-			bool IntRefActive,
-			bool Reset,
-		}
+			bool VBias;
+			bool IntRefActive;
+			bool Reset;
+		};
 		struct InterfaceRegister
 		{
-			bool TimeOutActive,
-			bool ReportStatus,
-			bool ReportCheckSum,
-			bool ReportCheckCRC,
-		}
+			bool TimeOutActive;
+			bool ReportStatus;
+			bool ReportCheckSum;
+			bool ReportCheckCRC;
+		};
 		struct Mode0Register
 		{
-			bool RefReversal,
-			bool RunPulse,
-			bool ChopActive,
-			bool IDACRotation,
-			DelayValue Delay,
+			bool RefReversal;
+			bool RunPulse;
+			bool ChopActive;
+			bool IDACRotation;
+			DelayValue Delay;
 		};
 		struct Mode1Register
 		{
-			bool SensorBiasToADC2,
-			bool SensorBiasPolarity,
-			FilterValue Filter,
-			SensorBiasValue SensorBias,
+			bool SensorBiasToADC2;
+			bool SensorBiasPolarity;
+			FilterValue Filter;
+			SensorBiasValue SensorBias;
 		};
 		struct Mode2Register
 		{
-			bool GainBypass,
-			ADC1GainValue ADC1Gain,
-			ADC1DataRateValue ADC1DataRate,
+			bool GainBypass;
+			ADC1GainValue ADC1Gain;
+			ADC1DataRateValue ADC1DataRate;
 		};
 		struct InputMultiplexerRegister
 		{
-			InputMUXValue PositiveChannel,
-			InputMUXValue NegativeChannel,
+			InputMUXValue PositiveChannel;
+			InputMUXValue NegativeChannel;
 		};
 		struct IDACMultiplexerRegister
 		{
-			InputMUXValue Channel1,
-			InputMUXValue Channel2,
+			IDACMUXValue Channel1;
+			IDACMUXValue Channel2;
 		};
 		struct IDACMagnitudeRegister
 		{
-			IDACMAGValue IDAC1Magnitude,
-			IDACMAGValue IDAC2Magnitude,
+			IDACMAGValue IDAC1Magnitude;
+			IDACMAGValue IDAC2Magnitude;
 		};
 		struct ReferenceMultiplexerRegister
 		{
-			REFMUXValue PostitiveChannel,
-			REFMUXValue NegativeChannel,
+			REFMUXValue PositiveChannel;
+			REFMUXValue NegativeChannel;
 		};
 		struct TDACConfigurationRegister
 		{
-			bool Active,
-			TDACValue Magnitude,
+			bool Active;
+			TDACValue Magnitude;
 		};
 		struct ADC2ConfigurationRegister
 		{
-			ADC2DataRateValue DataRate,
-			ADC2Reference Reference,
-			ADC2GainValue Gain,
+			ADC2DataRateValue DataRate;
+			ADC2Reference Reference;
+			ADC2GainValue Gain;
 		};
 		struct ADC2MultiplexerRegister
 		{
-			InputMUXValue PositiveChannel,
-			InputMUXValue NegativeChannel,
-		}
+			InputMUXValue PositiveChannel;
+			InputMUXValue NegativeChannel;
+		};
 		//Values for ADC2MUX MUXN2 and MUXP2 are InputMUXValue
+		//Initializers
 		ADS1263(uint8_t InitCSSelectPin);
 		ADS1263(uint8_t InitCSSelectPin, uint8_t InitDataReadyPin);
 		ADS1263(uint8_t InitCSSelectPin, uint8_t InitDataReadyPin, uint8_t InitStartPin);
-		bool begin();
-		bool check();
+		//
+		bool Begin();
+		bool Check();
+		bool StartADC1();
+		bool StartADC2();
+		bool StopADC1();
+		bool StopADC2();
+		bool ReadADC1();
+		bool ReadADC2();
+		bool FireADC1Callback();
+		bool FireADC2Callback();
+		bool SetReferenceVoltage(double ReferenceVoltageToSet);
 		//Pin controls
 		bool SetDataReadyPin(uint8_t DataReadyPinToSet);
 		bool SetUseDataReadyPin(bool ValueToSet);
 		bool SetStartPin(uint8_t StartPinToSet);
 		bool SetUseStartPin(uint8_t ValueToSet);
+		bool SetVerbose(bool VerboseToSet);
+		bool GetChipID(uint8_t* IDByteToSet);
 		//Setting power register
 		bool SetReset(bool ValueToSet);
 		bool SetVBias(bool ValueToSet);
@@ -506,16 +538,54 @@ class ADS1263
 		bool SetADC2Multiplexer(InputMUXValue PositiveChannelToSet, InputMUXValue NegativeChannelToSet);
 		bool SetADC2Multiplexer(ADC2MultiplexerRegister* RegisterToSet);
 		bool GetADC2Multiplexer(ADC2MultiplexerRegister* RegisterToGet);
+		//Listener setting
+		bool SetNewADC1Callback(NewSampleListener ListenerToSet);
+		bool SetNewADC2Callback(NewSampleListener ListenerToSet);
+		//
+		bool CheckSum(uint8_t* Data, uint8_t DataSize, uint8_t CheckValue);
+		bool CheckCRC(uint8_t* Data, uint8_t DataSize, uint8_t CheckValue);
+		//
+		bool GetADC1Value(int32_t* DataToGet);
+		bool GetADC2Value(int32_t* DataToGet);
+		bool GetADC1Value(double* DataToGet);
+		bool GetADC2Value(double* DataToGet);
+		bool GetADC1Temperature(double* DataToGet);
+		bool GetADC2Temperature(double* DataToGet);
+		bool GetADC1Busy(bool* DataToGet);
+		bool GetADC2Busy(bool* DataToGet);
 	private:
+		const uint8_t ReturnDataSize = 6;
+		const uint8_t CheckSumConstant = 0x9B;
+		uint8_t* ReturnData;
+		NewSampleListener NewADC1Callback;
+		NewSampleListener NewADC2Callback;
+		ADC1GainValue ADC1GainSetting;
+		ADC2GainValue ADC2GainSetting;
+		ADC1DataRateValue ADC1DataRate;
+		ADC2DataRateValue ADC2DataRate;
+		double ReferenceVoltage;
+		int32_t ADC1Value;
+		int32_t ADC2Value;
+		int32_t ADC1CheckTime;
+		int32_t ADC2CheckTime;
 		bool StatusByteActive;
 		bool UseDataReadyPin;
 		bool UseStartPin;
+		bool HasStatusByte;
+		bool HasCheckSumByte;
+		bool HasCRCByte;
+		bool Verbose;
 		uint8_t CSSelectPin;
 		uint8_t DataReadyPin;
 		uint8_t StartPin;
+		bool RunningADC1;
+		bool RunningADC2;
 		SPISettings ConnectionSettings;
+		bool Send(OpCodesSimple OpCodeToSend);
 		bool SendRecieve(OpCodesSimple OpCodeToSend, uint8_t* RecievedData, uint8_t BytesToRecieve);
 		bool ReadRegister(uint8_t RegisterAddress, uint8_t* ReceivedData, uint8_t BytesToRecieve);
 		bool WriteRegister(uint8_t RegisterAddress, uint8_t* WriteData, uint8_t BytesToSend);
+		static const ADC1SampeTimeForRate ADC1SampleTimeTable[];
+		static const ADC2SampeTimeForRate ADC2SampleTimeTable[];
 };
 #endif

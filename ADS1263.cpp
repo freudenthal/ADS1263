@@ -1,26 +1,560 @@
 #include "ADS1263.h"
 
+const ADS1263::ADC1SampeTimeForRate ADS1263::ADC1SampleTimeTable[] =
+{
+	{ADC1DataRateValue::SPS3, (int32_t)(1.0/3.0*1000000.0) },
+	{ADC1DataRateValue::SPS5, (int32_t)(1.0/5.0*1000000.0) },
+	{ADC1DataRateValue::SPS10, (int32_t)(1.0/10.0*1000000.0) },
+	{ADC1DataRateValue::SPS17, (int32_t)(1.0/17.0*1000000.0) },
+	{ADC1DataRateValue::SPS20, (int32_t)(1.0/20.0*1000000.0) },
+	{ADC1DataRateValue::SPS50, (int32_t)(1.0/50.0*1000000.0) },
+	{ADC1DataRateValue::SPS60, (int32_t)(1.0/60.0*1000000.0) },
+	{ADC1DataRateValue::SPS100, (int32_t)(1.0/100.0*1000000.0) },
+	{ADC1DataRateValue::SPS400, (int32_t)(1.0/400.0*1000000.0) },
+	{ADC1DataRateValue::SPS1200, (int32_t)(1.0/1200.0*1000000.0) },
+	{ADC1DataRateValue::SPS2400, (int32_t)(1.0/2400.0*1000000.0) },
+	{ADC1DataRateValue::SPS4800, (int32_t)(1.0/4800.0*1000000.0) },
+	{ADC1DataRateValue::SPS7200, (int32_t)(1.0/7200.0*1000000.0) },
+	{ADC1DataRateValue::SPS14400, (int32_t)(1.0/14400.0*1000000.0) },
+	{ADC1DataRateValue::SPS19200, (int32_t)(1.0/19200.0*1000000.0) },
+	{ADC1DataRateValue::SPS38400, (int32_t)(1.0/38400.0*1000000.0) },
+};
+
+const ADS1263::ADC2SampeTimeForRate ADS1263::ADC2SampleTimeTable[] =
+{
+	{ADC2DataRateValue::SPS10, (int32_t)(1.0/10.0*1000000.0) },
+	{ADC2DataRateValue::SPS100, (int32_t)(1.0/100.0*1000000.0) },
+	{ADC2DataRateValue::SPS400, (int32_t)(1.0/400.0*1000000.0) },
+	{ADC2DataRateValue::SPS800, (int32_t)(1.0/800.0*1000000.0) },
+};
+
 ADS1263::ADS1263(uint8_t InitCSSelectPin)
 {
 	CSSelectPin = InitCSSelectPin;
+	pinMode(CSSelectPin, OUTPUT);
+	digitalWrite(CSSelectPin, HIGH);
+	ReturnData = new uint8_t[ReturnDataSize]();
+	HasStatusByte = true;
+	HasCheckSumByte = true;
+	HasCRCByte = false;
+	Verbose = false;
+	ReferenceVoltage = 2.5;
+	ConnectionSettings = SPISettings(1000000, MSBFIRST, SPI_MODE1);
 }
 ADS1263::ADS1263(uint8_t InitCSSelectPin, uint8_t InitDataReadyPin) : ADS1263(InitCSSelectPin)
 {
 	DataReadyPin = InitDataReadyPin;
 	UseDataReadyPin = true;
+	pinMode(DataReadyPin, INPUT);
 }
 ADS1263::ADS1263(uint8_t InitCSSelectPin, uint8_t InitDataReadyPin, uint8_t InitStartPin) : ADS1263(InitCSSelectPin, InitDataReadyPin)
 {
 	StartPin = InitStartPin;
 	UseStartPin = true;
+	pinMode(StartPin, OUTPUT);
+	digitalWrite(StartPin, LOW);
 }
-bool ADS1263::begin()
+bool ADS1263::Begin()
 {
-	
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial power setting.\n");
+	}
+	PowerRegister InitialPowerSettings;
+	InitialPowerSettings.Reset = false;
+	InitialPowerSettings.VBias = false;
+	InitialPowerSettings.IntRefActive = true;
+	SetPowerRegister(&InitialPowerSettings);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial interface setting.\n");
+	}
+	InterfaceRegister InitialInterfaceSettings;
+	InitialInterfaceSettings.TimeOutActive = false;
+	InitialInterfaceSettings.ReportStatus = true;
+	InitialInterfaceSettings.ReportCheckSum = false;
+	InitialInterfaceSettings.ReportCheckCRC = false;
+	SetInterfaceRegister(&InitialInterfaceSettings);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial mode0 setting.\n");
+	}
+	Mode0Register InitialMode0Register;
+	InitialMode0Register.RefReversal = false;
+	InitialMode0Register.RunPulse = true;
+	InitialMode0Register.ChopActive = false;
+	InitialMode0Register.IDACRotation = false;
+	InitialMode0Register.Delay = DelayValue::NODELAY;
+	SetMode0(&InitialMode0Register);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial mode1 setting.\n");
+	}
+	Mode1Register InitialMode1Register;
+	InitialMode1Register.SensorBiasToADC2 = false;
+	InitialMode1Register.SensorBiasPolarity = false;
+	InitialMode1Register.Filter = FilterValue::FIR;
+	InitialMode1Register.SensorBias = SensorBiasValue::NOBIAS;
+	SetMode1(&InitialMode1Register);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial mode2 setting.\n");
+	}
+	Mode2Register InitialMode2Register;
+	InitialMode2Register.GainBypass = false;
+	InitialMode2Register.ADC1Gain = ADC1GainValue::V1V;
+	InitialMode2Register.ADC1DataRate = ADC1DataRateValue::SPS20;
+	SetMode2(&InitialMode2Register);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial input multiplexer setting.\n");
+	}
+	InputMultiplexerRegister InitialInputMultiplexerRegister;
+	InitialInputMultiplexerRegister.PositiveChannel = InputMUXValue::AIN0;
+	InitialInputMultiplexerRegister.NegativeChannel = InputMUXValue::AINCOM;
+	SetInputMultiplexer(&InitialInputMultiplexerRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial IDAC multiplexer setting.\n");
+	}
+	IDACMultiplexerRegister InitialIDACMultiplexerRegister;
+	InitialIDACMultiplexerRegister.Channel1 = IDACMUXValue::NOCONNECT;
+	InitialIDACMultiplexerRegister.Channel2 = IDACMUXValue::NOCONNECT;
+	SetIDACMultiplexer(&InitialIDACMultiplexerRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial IDAC magnitude setting.\n");
+	}
+	IDACMagnitudeRegister InitialIDACMagnitudeRegister;
+	InitialIDACMagnitudeRegister.IDAC1Magnitude = IDACMAGValue::uA0;
+	InitialIDACMagnitudeRegister.IDAC2Magnitude = IDACMAGValue::uA0;
+	SetIDACMagnitudes(&InitialIDACMagnitudeRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial reference multiplexer setting.\n");
+	}
+	ReferenceMultiplexerRegister InitialReferenceMultiplexerRegister;
+	InitialReferenceMultiplexerRegister.PositiveChannel = REFMUXValue::INT2V5;
+	InitialReferenceMultiplexerRegister.NegativeChannel = REFMUXValue::INT2V5;
+	SetReferenceChannelMultiplexer(&InitialReferenceMultiplexerRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial TDAC positive setting.\n");
+	}
+	TDACConfigurationRegister InitialTDACPositveRegister;
+	InitialTDACPositveRegister.Active = false;
+	InitialTDACPositveRegister.Magnitude = TDACValue::Vp00000;
+	SetTDACPositive(&InitialTDACPositveRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial TDAC negative setting.\n");
+	}
+	TDACConfigurationRegister InitialTDACNegativeRegister;
+	InitialTDACNegativeRegister.Active = false;
+	InitialTDACNegativeRegister.Magnitude = TDACValue::Vp00000;
+	SetTDACNegative(&InitialTDACNegativeRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial ADC2 configuration setting.\n");
+	}
+	ADC2ConfigurationRegister InitialADC2ConfigurationRegister;
+	InitialADC2ConfigurationRegister.DataRate = ADC2DataRateValue::SPS400;
+	InitialADC2ConfigurationRegister.Reference = ADC2Reference::INT2V5;
+	InitialADC2ConfigurationRegister.Gain = ADC2GainValue::V1V;
+	SetADC2Configuration(&InitialADC2ConfigurationRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial ADC2 multiplexer setting.\n");
+	}
+	ADC2MultiplexerRegister InitialADC2MultiplexerRegister;
+	InitialADC2MultiplexerRegister.PositiveChannel = InputMUXValue::TEMP;
+	InitialADC2MultiplexerRegister.NegativeChannel = InputMUXValue::TEMP;
+	SetADC2Multiplexer(&InitialADC2MultiplexerRegister);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial GPIO active setting.\n");
+	}
+	uint8_t GIOPinsToActive = 0;
+	bitWrite(GIOPinsToActive,3,true);
+	bitWrite(GIOPinsToActive,5,true);
+	bitWrite(GIOPinsToActive,6,true);
+	SetGPIOActive(GIOPinsToActive);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial GPIO direction setting.\n");
+	}
+	uint8_t GIOPinsDirection = 0;
+	bitWrite(GIOPinsToActive,3,false);
+	bitWrite(GIOPinsToActive,5,false);
+	bitWrite(GIOPinsToActive,6,false);
+	SetGPIODirection(GIOPinsDirection);
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Initial GPIO output setting.\n");
+	}
+	uint8_t GIOPinsOutput = 0;
+	bitWrite(GIOPinsOutput,3,false);
+	bitWrite(GIOPinsOutput,5,false);
+	bitWrite(GIOPinsOutput,6,false);
+	SetGPIOOutput(GIOPinsOutput);
+	return true;
 }
-bool ADS1263::check()
+bool ADS1263::Check()
 {
-	
+	int32_t TimeNow = micros();
+	if (RunningADC1)
+	{
+		if (UseDataReadyPin)
+		{
+			bool DataReadyPinStatus = (bool)digitalRead(DataReadyPin);
+			if (!DataReadyPinStatus)
+			{
+				digitalWrite(StartPin, LOW);
+				if (Verbose)
+				{
+					Serial.print("[ADS1263] Complete.\n");
+				}
+				bool IsNewAndStatus = ReadADC1();
+				if (IsNewAndStatus)
+				{
+					RunningADC1 = false;
+				}
+			}
+		}
+		else
+		{
+			if (TimeNow > ADC1CheckTime)
+			{
+				bool IsNewAndStatus = ReadADC1();
+				if (IsNewAndStatus)
+				{
+					RunningADC1 = false;
+				}
+				else
+				{
+					ADC1CheckTime = ADC1CheckTime + 1000;
+				}
+			}
+		}
+	}
+	if (RunningADC2)
+	{
+		if (TimeNow > ADC2CheckTime)
+		{
+			bool IsNewAndStatus = ReadADC2();
+			if (IsNewAndStatus)
+			{
+				RunningADC2 = false;
+			}
+			else
+			{
+				ADC2CheckTime = ADC2CheckTime + 1000;
+			}
+		}
+	}
+	return true;
+}
+bool ADS1263::ReadADC1()
+{
+	uint8_t ExpectedReturnDataSize = 4;
+	if (HasStatusByte)
+	{
+		ExpectedReturnDataSize++;
+	}
+	if (HasCheckSumByte || HasCRCByte)
+	{
+		ExpectedReturnDataSize++;
+	}
+	bool Status = SendRecieve(OpCodesSimple::RDATA1,ReturnData,ExpectedReturnDataSize);
+	uint8_t DataStartByte = 0;
+	bool NewADC1 = true;
+	if (HasStatusByte)
+	{
+		uint8_t StatusByte = ReturnData[0];
+		NewADC1 = (bool)bitRead(StatusByte, static_cast<uint8_t>(StatusCode::ADC1));
+		DataStartByte = 1;
+	}
+	uint8_tToint DataConverter;
+	DataConverter.array[3] = ReturnData[DataStartByte+0];
+	DataConverter.array[2] = ReturnData[DataStartByte+1];
+	DataConverter.array[1] = ReturnData[DataStartByte+2];
+	DataConverter.array[0] = ReturnData[DataStartByte+3];
+	ADC1Value = DataConverter.integer;
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] ADC1 ");
+		Serial.print(DataConverter.integer);
+		Serial.print(',');
+		Serial.print(DataConverter.array[0],HEX);
+		Serial.print(',');
+		Serial.print(DataConverter.array[1],HEX);
+		Serial.print(',');
+		Serial.print(DataConverter.array[2],HEX);
+		Serial.print(',');
+		Serial.print(DataConverter.array[3],HEX);
+		Serial.print('\n');
+	}
+	if (HasCRCByte)
+	{
+		Status = Status & CheckCRC(ReturnData + DataStartByte, 4, ReturnData[DataStartByte+4]);
+	}
+	if (HasCheckSumByte)
+	{
+		Status = Status & CheckSum(ReturnData + DataStartByte, 4, ReturnData[DataStartByte+4]);
+	}
+	if (NewADC1)
+	{
+		FireADC1Callback();
+	}
+	return Status && NewADC1;
+}
+bool ADS1263::ReadADC2()
+{
+	uint8_t ExpectedReturnDataSize = 4;
+	if (HasStatusByte)
+	{
+		ExpectedReturnDataSize++;
+	}
+	if (HasCheckSumByte || HasCRCByte)
+	{
+		ExpectedReturnDataSize++;
+	}
+	bool Status = SendRecieve(OpCodesSimple::RDATA2,ReturnData,ExpectedReturnDataSize);
+	uint8_t DataStartByte = 0;
+	bool NewADC2 = true;
+	if (HasStatusByte)
+	{
+		uint8_t StatusByte = ReturnData[0];
+		NewADC2 = (bool)bitRead(StatusByte, static_cast<uint8_t>(StatusCode::ADC2));
+		DataStartByte = 1;
+	}
+	uint8_tToint DataConverter;
+	DataConverter.array[3] = ReturnData[DataStartByte+0];
+	DataConverter.array[2] = ReturnData[DataStartByte+1];
+	DataConverter.array[1] = ReturnData[DataStartByte+2];
+	DataConverter.array[0] = ReturnData[DataStartByte+3];
+	ADC2Value = DataConverter.integer / 256;
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] ADC2 ");
+		Serial.print(ADC1Value);
+		Serial.print('\n');
+	}
+	if (HasCRCByte)
+	{
+		Status = Status & CheckCRC(ReturnData + DataStartByte, 4, ReturnData[DataStartByte+4]);
+	}
+	if (HasCheckSumByte)
+	{
+		Status = Status & CheckSum(ReturnData + DataStartByte, 4, ReturnData[DataStartByte+4]);
+	}
+	if (NewADC2)
+	{
+		FireADC2Callback();
+	}
+	return Status && NewADC2;
+}
+bool ADS1263::StartADC1()
+{
+	bool Status = true;
+	if (RunningADC1)
+	{
+		Status = StopADC1();
+	}
+	RunningADC1 = true;
+	if (UseStartPin)
+	{
+		digitalWrite(StartPin, HIGH);
+		if (Verbose)
+		{
+			Serial.print("[ADS1263] START PIN\n");
+		}
+	}
+	else
+	{
+		Status = Status && Send(OpCodesSimple::START1);
+	}
+	ADC1CheckTime = micros() + ADC1SampleTimeTable[static_cast<uint8_t>(ADC1DataRate)].Micros;
+	return Status;
+}
+bool ADS1263::StopADC1()
+{
+	RunningADC1 = false;
+	if (UseStartPin)
+	{
+		digitalWrite(StartPin, LOW);
+		delayMicroseconds(3);
+		return true;
+	}
+	else
+	{
+		return Send(OpCodesSimple::STOP1);
+	}
+}
+bool ADS1263::StartADC2()
+{
+	bool Status = true;
+	if (RunningADC2)
+	{
+		Status = StopADC2();
+	}
+	if (!RunningADC2)
+	{
+		RunningADC2 = true;
+		Status = Status && Send(OpCodesSimple::START2);
+	}
+	ADC2CheckTime = micros() + ADC2SampleTimeTable[static_cast<uint8_t>(ADC2DataRate)].Micros;
+	return Status;
+}
+bool ADS1263::StopADC2()
+{
+	RunningADC2 = false;
+	bool Status = Send(OpCodesSimple::STOP2);
+	return Status;
+}
+bool ADS1263::FireADC1Callback()
+{
+	if (NewADC1Callback)
+	{
+		NewADC1Callback();
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+bool ADS1263::FireADC2Callback()
+{
+	if (NewADC2Callback)
+	{
+		NewADC2Callback();
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+bool ADS1263::SetVerbose(bool VerboseToSet)
+{
+	Verbose = VerboseToSet;
+	return true;
+}
+bool ADS1263::SetReferenceVoltage(double ReferenceVoltageToSet)
+{
+	ReferenceVoltage = ReferenceVoltageToSet;
+	return true;
+}
+bool ADS1263::GetADC1Value(int32_t* DataToGet)
+{
+	*DataToGet = ADC1Value;
+	return true;
+}
+bool ADS1263::GetADC1Value(double* DataToGet)
+{
+	//int32 max value 2147483647
+	double GainAmplitude = (double)(1 << static_cast<uint8_t>(ADC1GainSetting));
+	*DataToGet =  (double)(ADC1Value) / (double)(2147483647) * GainAmplitude * ReferenceVoltage;
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] ADC1V ");
+		Serial.print(*DataToGet);
+		Serial.print(',');
+		Serial.print(GainAmplitude);
+		Serial.print(',');
+		Serial.print(ReferenceVoltage);
+		Serial.print('\n');
+	}
+	return true;
+}
+bool ADS1263::GetADC1Busy(bool* DataToGet)
+{
+	*DataToGet = RunningADC1;
+	return true;
+}
+bool ADS1263::GetADC2Busy(bool* DataToGet)
+{
+	*DataToGet = RunningADC2;
+	return true;
+}
+bool ADS1263::GetADC1Temperature(double* DataToGet)
+{
+	double VoltageRecorded;
+	bool Status = GetADC1Value(&VoltageRecorded);
+	*DataToGet = ((VoltageRecorded * 0.000001)-122400.0)/420.0+25.0;
+	return Status;
+}
+bool ADS1263::GetADC2Value(int32_t* DataToGet)
+{
+	*DataToGet = ADC2Value;
+	return true;
+}
+bool ADS1263::GetADC2Value(double* DataToGet)
+{
+	//int24 max value 8388608
+	*DataToGet =  (double)(ADC2Value) / (double)(8388608) * (double)(1 << static_cast<uint8_t>(ADC2GainSetting)) * ReferenceVoltage;
+	return true;
+}
+bool ADS1263::GetADC2Temperature(double* DataToGet)
+{
+	double VoltageRecorded;
+	bool Status = GetADC2Value(&VoltageRecorded);
+	*DataToGet = ((VoltageRecorded * 0.000001)-122400.0)/420.0+25.0;
+	return Status;
+}
+bool ADS1263::CheckSum(uint8_t* Data, uint8_t DataSize, uint8_t CheckValue)
+{
+	uint8_t Sum = 0;
+	for (int DataIndex = 0; DataIndex < DataSize; ++DataIndex)
+	{
+		Sum = (Sum + Data[DataIndex]) & 0xFF;
+	}
+	Sum = (Sum + CheckSumConstant) & 0xFF;
+	if (Sum != CheckValue)
+	{
+		return false;
+	}
+	else
+	{
+		return true;
+	}
+}
+bool ADS1263::CheckCRC(uint8_t* Data, uint8_t DataSize, uint8_t CheckValue)
+{
+    uint8_t crc = 0x00;
+    while (DataSize--)
+    {
+        uint8_t extract = *Data++;
+        for (uint8_t tempI = 8; tempI; tempI--)
+        {
+            uint8_t sum = (crc ^ extract) & 0x01;
+            crc >>= 1;
+            if (sum)
+            {
+                crc ^= 0x8C;
+            }
+            extract >>= 1;
+        }
+    }
+    if (CheckValue != crc)
+    {
+    	return false;
+    }
+    else
+    {
+    	return true;
+    }
+}
+bool ADS1263::SetNewADC1Callback(NewSampleListener ListenerToSet)
+{
+	NewADC1Callback = ListenerToSet;
+	return true;
+}
+bool ADS1263::SetNewADC2Callback(NewSampleListener ListenerToSet)
+{
+	NewADC2Callback = ListenerToSet;
+	return true;
 }
 //Pin controls
 bool ADS1263::SetDataReadyPin(uint8_t DataReadyPinToSet)
@@ -42,6 +576,12 @@ bool ADS1263::SetUseStartPin(uint8_t ValueToSet)
 {
 	UseStartPin = ValueToSet;
 	return true;
+}
+bool ADS1263::GetChipID(uint8_t* IDByteToSet)
+{
+	bool Status = false;
+	Status = ReadRegister(static_cast<uint8_t>(RegisterMap::ID), IDByteToSet, 1);
+	return Status;
 }
 //Setting power register
 bool ADS1263::SetReset(bool ValueToSet)
@@ -79,6 +619,12 @@ bool ADS1263::SetPowerRegister(PowerRegister* RegisterToSet)
 	bitWrite(RegisterToSend, static_cast<uint8_t>(PowerRegMap::RESET), RegisterToSet->Reset);
 	bitWrite(RegisterToSend, static_cast<uint8_t>(PowerRegMap::VBIAS), RegisterToSet->VBias);
 	bitWrite(RegisterToSend, static_cast<uint8_t>(PowerRegMap::INTREF), RegisterToSet->IntRefActive);
+	//if (Verbose)
+	//{
+	//	Serial.print("[ADS1263] Power reg: ");
+	//	Serial.print(RegisterToSend, HEX);
+	//	Serial.print('\n');
+	//}
 	return WriteRegister(static_cast<uint8_t>(RegisterMap::POWER), &RegisterToSend, 1);
 }
 bool ADS1263::GetPowerRegister(PowerRegister* RegisterToGet)
@@ -134,6 +680,9 @@ bool ADS1263::SetInterfaceRegister(bool TimeOutActiveToSet, bool ReportStatusToS
 }
 bool ADS1263::SetInterfaceRegister(InterfaceRegister* RegisterToSet)
 {
+	HasStatusByte = RegisterToSet->ReportStatus;
+	HasCheckSumByte = RegisterToSet->ReportCheckSum;
+	HasCRCByte = RegisterToSet->ReportCheckCRC;
 	uint8_t RegisterToSend = 0;
 	bitWrite(RegisterToSend, static_cast<uint8_t>(InterfaceRegMap::TIMEOUT), RegisterToSet->TimeOutActive);
 	bitWrite(RegisterToSend, static_cast<uint8_t>(InterfaceRegMap::STATUS), RegisterToSet->ReportStatus);
@@ -154,6 +703,9 @@ bool ADS1263::GetInterfaceRegister(InterfaceRegister* RegisterToGet)
 	RegisterToGet->ReportStatus = (bool)bitRead(ReturnByte, StatusBitToRead);
 	RegisterToGet->ReportCheckCRC = (bool)bitRead(ReturnByte, CheckCRCBitToRead);
 	RegisterToGet->ReportCheckSum = (bool)bitRead(ReturnByte, CheckSumToRead);
+	HasStatusByte = RegisterToGet->ReportStatus;
+	HasCheckSumByte = RegisterToGet->ReportCheckSum;
+	HasCRCByte = RegisterToGet->ReportCheckCRC;
 	return Status;
 }
 //Setting mode 0 register
@@ -319,7 +871,7 @@ bool ADS1263::SetMode2(bool GainBypassToSet, ADC1GainValue ADC1GainValueToSet, A
 	RegisterToSet.GainBypass = GainBypassToSet;
 	RegisterToSet.ADC1Gain = ADC1GainValueToSet;
 	RegisterToSet.ADC1DataRate = ADC1DataRateValueToSet;
-	return SetMode2($RegisterToSet);
+	return SetMode2(&RegisterToSet);
 }
 bool ADS1263::SetMode2(Mode2Register* RegisterToSet)
 {
@@ -327,6 +879,8 @@ bool ADS1263::SetMode2(Mode2Register* RegisterToSet)
 	uint8_t RegisterToSend = static_cast<uint8_t>(RegisterToSet->ADC1DataRate);
 	RegisterToSend |= ( static_cast<uint8_t>(RegisterToSet->ADC1Gain) << GainShift);
 	bitWrite(RegisterToSend, static_cast<uint8_t>(Mode2RegMap::BYPASS), RegisterToSet->GainBypass);
+	ADC1GainSetting = RegisterToSet->ADC1Gain;
+	ADC1DataRate = RegisterToSet->ADC1DataRate;
 	return WriteRegister(static_cast<uint8_t>(RegisterMap::MODE2), &RegisterToSend, 1);
 }
 bool ADS1263::GetMode2(Mode2Register* RegisterToGet)
@@ -341,6 +895,8 @@ bool ADS1263::GetMode2(Mode2Register* RegisterToGet)
 	RegisterToGet->GainBypass = (bool)bitRead(ReturnByte, BypassBitToRead);
 	RegisterToGet->ADC1Gain = static_cast<ADC1GainValue>( (ReturnByte & GainMask) >> GainShift );
 	RegisterToGet->ADC1DataRate = static_cast<ADC1DataRateValue>( ReturnByte & DataRateMask );
+	ADC1GainSetting = RegisterToGet->ADC1Gain;
+	ADC1DataRate = RegisterToGet->ADC1DataRate;
 	return Status;
 }
 //Setting input multiplexer
@@ -349,6 +905,14 @@ bool ADS1263::SetADC1PositiveChannel(InputMUXValue ValueToSet)
 	InputMultiplexerRegister RegisterToSet;
 	bool Status = GetInputMultiplexer(&RegisterToSet);
 	RegisterToSet.PositiveChannel = ValueToSet;
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] ADC1MUX PSET ");
+		Serial.print(static_cast<uint8_t>(RegisterToSet.PositiveChannel), HEX);
+		Serial.print(',');
+		Serial.print(static_cast<uint8_t>(RegisterToSet.NegativeChannel), HEX);
+		Serial.print('\n');
+	}
 	return Status & SetInputMultiplexer(&RegisterToSet);
 }
 bool ADS1263::SetADC1NegativeChannel(InputMUXValue ValueToSet)
@@ -363,7 +927,7 @@ bool ADS1263::SetInputMultiplexer(InputMUXValue PositiveChannelToSet, InputMUXVa
 	InputMultiplexerRegister RegisterToSet;
 	RegisterToSet.PositiveChannel = PositiveChannelToSet;
 	RegisterToSet.NegativeChannel = NegativeChannelToSet;
-	return SetInputMultiplexer($RegisterToSet);
+	return SetInputMultiplexer(&RegisterToSet);
 }
 bool ADS1263::SetInputMultiplexer(InputMultiplexerRegister* RegisterToSet)
 {
@@ -375,12 +939,26 @@ bool ADS1263::SetInputMultiplexer(InputMultiplexerRegister* RegisterToSet)
 bool ADS1263::GetInputMultiplexer(InputMultiplexerRegister* RegisterToGet)
 {
 	const uint8_t PositiveChannelShift = static_cast<uint8_t>(InputMUXRegMap::MUXP);
-	const uint8_t NegativeChannelMask = ( (1 << static_cast<uint8_t>(InputMUXRegMap::MUXN)) - 1);
+	const uint8_t NegativeChannelMask = ( (1 << static_cast<uint8_t>(InputMUXRegMap::MUXP)) - 1);
 	uint8_t ReturnByte;
 	bool Status = false;
 	Status = ReadRegister(static_cast<uint8_t>(RegisterMap::INPMUX), &ReturnByte, 1);
 	RegisterToGet->PositiveChannel = static_cast<InputMUXValue>( ReturnByte >> PositiveChannelShift );
 	RegisterToGet->NegativeChannel = static_cast<InputMUXValue>( ReturnByte & NegativeChannelMask );
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] ADC1MUX GET ");
+		Serial.print(ReturnByte, HEX);
+		Serial.print(',');
+		Serial.print(static_cast<uint8_t>(RegisterToGet->PositiveChannel), HEX);
+		//Serial.print(',');
+		//Serial.print(PositiveChannelShift, HEX);
+		Serial.print(',');
+		Serial.print(static_cast<uint8_t>(RegisterToGet->NegativeChannel), HEX);
+		//Serial.print(',');
+		//Serial.print(NegativeChannelMask, HEX);
+		Serial.print('\n');
+	}
 	return Status;
 }
 //Setting IDAC multiplexer
@@ -403,7 +981,7 @@ bool ADS1263::SetIDACMultiplexer(IDACMUXValue IDAC1ChannelToSet, IDACMUXValue ID
 	IDACMultiplexerRegister RegisterToSet;
 	RegisterToSet.Channel1 = IDAC1ChannelToSet;
 	RegisterToSet.Channel2 = IDAC2ChannelToSet;
-	return SetIDACMultiplexer($RegisterToSet);
+	return SetIDACMultiplexer(&RegisterToSet);
 }
 bool ADS1263::SetIDACMultiplexer(IDACMultiplexerRegister* RegisterToSet)
 {
@@ -419,8 +997,8 @@ bool ADS1263::GetIDACMultiplexer(IDACMultiplexerRegister* RegisterToGet)
 	uint8_t ReturnByte;
 	bool Status = false;
 	Status = ReadRegister(static_cast<uint8_t>(RegisterMap::IDACMUX), &ReturnByte, 1);
-	RegisterToGet->Channel2 = static_cast<InputMUXValue>( ReturnByte >> Channel2Shift );
-	RegisterToGet->Channel1 = static_cast<InputMUXValue>( ReturnByte & Channel1Mask );
+	RegisterToGet->Channel2 = static_cast<IDACMUXValue>( ReturnByte >> Channel2Shift );
+	RegisterToGet->Channel1 = static_cast<IDACMUXValue>( ReturnByte & Channel1Mask );
 	return Status;
 }
 //Setting IDAC magnitude
@@ -443,7 +1021,7 @@ bool ADS1263::SetIDACMagnitudes(IDACMAGValue IDAC1MagnitudeToSet, IDACMAGValue I
 	IDACMagnitudeRegister RegisterToSet;
 	RegisterToSet.IDAC1Magnitude = IDAC1MagnitudeToSet;
 	RegisterToSet.IDAC2Magnitude = IDAC2MagnitudeValueToSet;
-	return SetIDACMagnitudes($RegisterToSet);
+	return SetIDACMagnitudes(&RegisterToSet);
 }
 bool ADS1263::SetIDACMagnitudes(IDACMagnitudeRegister* RegisterToSet)
 {
@@ -452,7 +1030,7 @@ bool ADS1263::SetIDACMagnitudes(IDACMagnitudeRegister* RegisterToSet)
 	RegisterToSend |= ( static_cast<uint8_t>(RegisterToSet->IDAC2Magnitude) << Channel2Shift);
 	return WriteRegister(static_cast<uint8_t>(RegisterMap::IDACMAG), &RegisterToSend, 1);
 }
-bool ADS1263::GetIDACMagnitudes(IDACMagnitudeRegister* RegisterToSet)
+bool ADS1263::GetIDACMagnitudes(IDACMagnitudeRegister* RegisterToGet)
 {
 	const uint8_t IDAC2Shift = static_cast<uint8_t>(IDACMAGRegMap::MAG2);
 	const uint8_t IDAC1Mask = ( (1 << static_cast<uint8_t>(IDACMAGRegMap::MAG2)) - 1);
@@ -469,16 +1047,16 @@ bool ADS1263::SetReferenceChannelPositive(REFMUXValue ValueToSet)
 	ReferenceMultiplexerRegister RegisterToSet;
 	bool Status = GetReferenceChannelMultiplexer(&RegisterToSet);
 	RegisterToSet.PositiveChannel = ValueToSet;
-	return Status & SetReferenceChannelNegative(&RegisterToSet);
+	return Status & SetReferenceChannelMultiplexer(&RegisterToSet);
 }
 bool ADS1263::SetReferenceChannelNegative(REFMUXValue ValueToSet)
 {
 	ReferenceMultiplexerRegister RegisterToSet;
 	bool Status = GetReferenceChannelMultiplexer(&RegisterToSet);
 	RegisterToSet.NegativeChannel = ValueToSet;
-	return Status & SetReferenceChannelNegative(&RegisterToSet);
+	return Status & SetReferenceChannelMultiplexer(&RegisterToSet);
 }
-bool ADS1263::SetReferenceChannelMultiplexer(REFMUXValue PostitiveChannelToSet, REFMUXValue NegativeChannelToSet)
+bool ADS1263::SetReferenceChannelMultiplexer(REFMUXValue PositiveChannelToSet, REFMUXValue NegativeChannelToSet)
 {
 	ReferenceMultiplexerRegister RegisterToSet;
 	RegisterToSet.PositiveChannel = PositiveChannelToSet;
@@ -519,11 +1097,11 @@ bool ADS1263::SetTDACPositiveMagnitude(TDACValue ValueToSet)
 	RegisterToSet.Magnitude = ValueToSet;
 	return Status & SetTDACPositive(&RegisterToSet);
 }
-bool ADS1263::SetTDACPositive(bool PositiveActiveValueToSet, TDACValue PositiveMagnitudeToSet)
+bool ADS1263::SetTDACPositive(bool PositiveActiveToSet, TDACValue PositiveMagnitudeToSet)
 {
 	TDACConfigurationRegister RegisterToSet;
-	RegisterToSet.Active = NegativeActiveValueToSet;
-	RegisterToSet.Magnitude = NegativeMagnitudeToSet;
+	RegisterToSet.Active = PositiveActiveToSet;
+	RegisterToSet.Magnitude = PositiveMagnitudeToSet;
 	return SetTDACPositive(&RegisterToSet);
 }
 bool ADS1263::SetTDACPositive(TDACConfigurationRegister* RegisterToSet)
@@ -539,7 +1117,7 @@ bool ADS1263::GetTDACPositive(TDACConfigurationRegister* RegisterToGet)
 	uint8_t ReturnByte;
 	bool Status = false;
 	Status = ReadRegister(static_cast<uint8_t>(RegisterMap::TDACP), &ReturnByte, 1);
-	RegisterToGet->Active = (bool)BitRead(ReturnByte, ActiveBitToRead);
+	RegisterToGet->Active = (bool)bitRead(ReturnByte, ActiveBitToRead);
 	RegisterToGet->Magnitude = static_cast<TDACValue>( ReturnByte >> MagnitudeShift );
 	return Status;
 }
@@ -578,7 +1156,7 @@ bool ADS1263::GetTDACNegative(TDACConfigurationRegister* RegisterToGet)
 	uint8_t ReturnByte;
 	bool Status = false;
 	Status = ReadRegister(static_cast<uint8_t>(RegisterMap::TDACN), &ReturnByte, 1);
-	RegisterToGet->Active = (bool)BitRead(ReturnByte, ActiveBitToRead);
+	RegisterToGet->Active = (bool)bitRead(ReturnByte, ActiveBitToRead);
 	RegisterToGet->Magnitude = static_cast<TDACValue>( ReturnByte >> MagnitudeShift );
 	return Status;
 }
@@ -653,8 +1231,10 @@ bool ADS1263::SetADC2Configuration(ADC2ConfigurationRegister* RegisterToSet)
 	const uint8_t DataRateShift = static_cast<uint8_t>(ADC2CFGRegMap::DR2);
 	const uint8_t ReferenceInputShift = static_cast<uint8_t>(ADC2CFGRegMap::REF2);
 	uint8_t RegisterToSend = static_cast<uint8_t>(RegisterToSet->Gain);
-	RegisterToSend |= ( static_cast<uint8_t>(RegisterToGet->Reference) << ReferenceInputShift );
-	RegisterToSend |= ( static_cast<uint8_t>(RegisterToGet->DataRate) << DataRateShift );
+	RegisterToSend |= ( static_cast<uint8_t>(RegisterToSet->Reference) << ReferenceInputShift );
+	RegisterToSend |= ( static_cast<uint8_t>(RegisterToSet->DataRate) << DataRateShift );
+	ADC2GainSetting = RegisterToSet->Gain;
+	ADC2DataRate = RegisterToSet->DataRate;
 	return WriteRegister(static_cast<uint8_t>(RegisterMap::ADC2CFG), &RegisterToSend, 1);
 }
 bool ADS1263::GetADC2Configuration(ADC2ConfigurationRegister* RegisterToGet)
@@ -669,6 +1249,8 @@ bool ADS1263::GetADC2Configuration(ADC2ConfigurationRegister* RegisterToGet)
 	RegisterToGet->DataRate = static_cast<ADC2DataRateValue>(ReturnByte >> DataRateShift);
 	RegisterToGet->Reference = static_cast<ADC2Reference>( (ReturnByte & ReferenceInputMask) >> ReferenceInputShift );
 	RegisterToGet->Gain = static_cast<ADC2GainValue>(ReturnByte & GainMask);
+	ADC2GainSetting = RegisterToGet->Gain;
+	ADC2DataRate = RegisterToGet->DataRate;
 	return Status;
 }
 //Set ADC multiplexer
@@ -709,38 +1291,84 @@ bool ADS1263::GetADC2Multiplexer(ADC2MultiplexerRegister* RegisterToGet)
 	bool Status = false;
 	Status = ReadRegister(static_cast<uint8_t>(RegisterMap::ADC2MUX), &ReturnByte, 1);
 	RegisterToGet->PositiveChannel = static_cast<InputMUXValue>(ReturnByte >> PositiveChannelShift );
-	RegisterToGet->NegativeChannel = static_cast<InputMUXValue>(ReturnByte & NegativeChannel);
+	RegisterToGet->NegativeChannel = static_cast<InputMUXValue>(ReturnByte & NegativeChannelMask);
 	return Status;
 }
 //
-bool ADS1263::SendRecieve(OpCodesSimple OpCodeToSend, uint8_t* RecievedData, uint8_t BytesToRecieve)
+bool ADS1263::Send(OpCodesSimple OpCodeToSend)
+{
+	uint8_t ByteToSend = static_cast<uint8_t>(OpCodeToSend);
+	SPI.beginTransaction(ConnectionSettings);
+	digitalWrite(CSSelectPin,LOW);
+	SPI.transfer(ByteToSend);
+	digitalWrite(CSSelectPin, HIGH);
+	SPI.endTransaction();
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] out: ");
+		Serial.print(ByteToSend, HEX);
+		Serial.print('\n');
+	}
+	return true;
+}
+bool ADS1263::SendRecieve(OpCodesSimple OpCodeToSend, uint8_t* ReceivedData, uint8_t BytesToRecieve)
 {
 	SPI.beginTransaction(ConnectionSettings);
 	digitalWrite(CSSelectPin,LOW);
-	SPI.transfer(OpCodeToSend);
-	for (uint8_t Index = 0; Index < BytesToSend; ++Index)
+	uint8_t ByteToSend = static_cast<uint8_t>(OpCodeToSend);
+	SPI.transfer(ByteToSend);
+	for (uint8_t Index = 0; Index < BytesToRecieve; ++Index)
 	{
 		ReceivedData[Index] = SPI.transfer(0);
 	}
-	digitalWrite(SelectPin, HIGH);
+	digitalWrite(CSSelectPin, HIGH);
 	SPI.endTransaction();
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] out: ");
+		Serial.print(ByteToSend, HEX);
+		Serial.print('\n');
+		Serial.print("[ADS1263] in: ");
+		for (uint8_t Index = 0; Index < BytesToRecieve; ++Index)
+		{
+			Serial.print(ReceivedData[Index], HEX);
+			Serial.print(',');
+		}
+		Serial.print('\n');
+	}
 	return true;
 }
 bool ADS1263::ReadRegister(uint8_t RegisterAddress, uint8_t* ReceivedData, uint8_t BytesToRecieve)
 {
-	if (BytesToSend > 0)
+	if (BytesToRecieve > 0)
 	{
 		uint8_t OpCodeToSend = static_cast<uint8_t>(OpCodesComplex::RREG) | RegisterAddress;
+		uint8_t ByteCountToSend = BytesToRecieve - 1;
 		SPI.beginTransaction(ConnectionSettings);
 		digitalWrite(CSSelectPin,LOW);
 		SPI.transfer(OpCodeToSend);
-		SPI.transfer(BytesToSend - 1);
-		for (uint8_t Index = 0; Index < BytesToSend; ++Index)
+		SPI.transfer(ByteCountToSend);
+		for (uint8_t Index = 0; Index < BytesToRecieve; ++Index)
 		{
 			ReceivedData[Index] = SPI.transfer(0);
 		}
-		digitalWrite(SelectPin, HIGH);
+		digitalWrite(CSSelectPin, HIGH);
 		SPI.endTransaction();
+		if (Verbose)
+		{
+			Serial.print("[ADS1263] out: ");
+			Serial.print(OpCodeToSend, HEX);
+			Serial.print(',');
+			Serial.print(ByteCountToSend, HEX);
+			Serial.print('\n');
+			Serial.print("[ADS1263] in: ");
+			for (uint8_t Index = 0; Index < BytesToRecieve; ++Index)
+			{
+				Serial.print(ReceivedData[Index], HEX);
+				Serial.print(',');
+			}
+			Serial.print('\n');
+		}
 		return true;
 	}
 	else
@@ -753,16 +1381,42 @@ bool ADS1263::WriteRegister(uint8_t RegisterAddress, uint8_t* WriteData, uint8_t
 	if (BytesToSend > 0)
 	{
 		uint8_t OpCodeToSend = static_cast<uint8_t>(OpCodesComplex::WREG) | RegisterAddress;
+		uint8_t ByteCountToSend = BytesToSend - 1;
+		//Serial.print("[ADS1263] out: ");
+		//Serial.print(OpCodeToSend, HEX);
+		//Serial.print(',');
+		//Serial.print(ByteCountToSend, HEX);
+		//Serial.print(',');
+		//for (uint8_t Index = 0; Index < BytesToSend; ++Index)
+		//{
+		//	Serial.print(WriteData[Index], HEX);
+		//	Serial.print(',');
+		//}
+		//Serial.print('\n');
 		SPI.beginTransaction(ConnectionSettings);
 		digitalWrite(CSSelectPin,LOW);
 		SPI.transfer(OpCodeToSend);
-		SPI.transfer(BytesToSend - 1);
+		SPI.transfer(ByteCountToSend);
 		for (uint8_t Index = 0; Index < BytesToSend; ++Index)
 		{
 			SPI.transfer(WriteData[Index]);
 		}
-		digitalWrite(SelectPin, HIGH);
+		digitalWrite(CSSelectPin, HIGH);
 		SPI.endTransaction();
+		if (Verbose)
+		{
+			Serial.print("[ADS1263] out: ");
+			Serial.print(OpCodeToSend, HEX);
+			Serial.print(',');
+			Serial.print(ByteCountToSend, HEX);
+			Serial.print(',');
+			for (uint8_t Index = 0; Index < BytesToSend; ++Index)
+			{
+				Serial.print(WriteData[Index], HEX);
+				Serial.print(',');
+			}
+			Serial.print('\n');
+		}
 		return true;
 	}
 	else
