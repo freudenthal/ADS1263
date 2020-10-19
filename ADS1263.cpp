@@ -56,6 +56,15 @@ ADS1263::ADS1263(uint8_t InitCSSelectPin, uint8_t InitDataReadyPin, uint8_t Init
 }
 bool ADS1263::Begin()
 {
+	return Begin(true);
+}
+bool ADS1263::Begin(uint8_t InitADC2)
+{
+	if (Verbose)
+	{
+		Serial.print("[ADS1263] Sending reset.\n");
+		Send(OpCodesSimple::RESET);
+	}
 	if (Verbose)
 	{
 		Serial.print("[ADS1263] Initial power setting.\n");
@@ -153,49 +162,43 @@ bool ADS1263::Begin()
 	InitialTDACNegativeRegister.Active = false;
 	InitialTDACNegativeRegister.Magnitude = TDACValue::Vp00000;
 	SetTDACNegative(&InitialTDACNegativeRegister);
-	if (Verbose)
+	if (InitADC2)
 	{
-		Serial.print("[ADS1263] Initial ADC2 configuration setting.\n");
+		if (Verbose)
+		{
+			Serial.print("[ADS1263] Initial ADC2 configuration setting.\n");
+		}
+		ADC2ConfigurationRegister InitialADC2ConfigurationRegister;
+		InitialADC2ConfigurationRegister.DataRate = ADC2DataRateValue::SPS400;
+		InitialADC2ConfigurationRegister.Reference = ADC2Reference::INT2V5;
+		InitialADC2ConfigurationRegister.Gain = ADC2GainValue::V1V;
+		SetADC2Configuration(&InitialADC2ConfigurationRegister);
+		if (Verbose)
+		{
+			Serial.print("[ADS1263] Initial ADC2 multiplexer setting.\n");
+		}
+		ADC2MultiplexerRegister InitialADC2MultiplexerRegister;
+		InitialADC2MultiplexerRegister.PositiveChannel = InputMUXValue::TEMP;
+		InitialADC2MultiplexerRegister.NegativeChannel = InputMUXValue::TEMP;
+		SetADC2Multiplexer(&InitialADC2MultiplexerRegister);
 	}
-	ADC2ConfigurationRegister InitialADC2ConfigurationRegister;
-	InitialADC2ConfigurationRegister.DataRate = ADC2DataRateValue::SPS400;
-	InitialADC2ConfigurationRegister.Reference = ADC2Reference::INT2V5;
-	InitialADC2ConfigurationRegister.Gain = ADC2GainValue::V1V;
-	SetADC2Configuration(&InitialADC2ConfigurationRegister);
-	if (Verbose)
-	{
-		Serial.print("[ADS1263] Initial ADC2 multiplexer setting.\n");
-	}
-	ADC2MultiplexerRegister InitialADC2MultiplexerRegister;
-	InitialADC2MultiplexerRegister.PositiveChannel = InputMUXValue::TEMP;
-	InitialADC2MultiplexerRegister.NegativeChannel = InputMUXValue::TEMP;
-	SetADC2Multiplexer(&InitialADC2MultiplexerRegister);
 	if (Verbose)
 	{
 		Serial.print("[ADS1263] Initial GPIO active setting.\n");
 	}
 	uint8_t GIOPinsToActive = 0;
-	bitWrite(GIOPinsToActive,3,true);
-	bitWrite(GIOPinsToActive,5,true);
-	bitWrite(GIOPinsToActive,6,true);
 	SetGPIOActive(GIOPinsToActive);
 	if (Verbose)
 	{
 		Serial.print("[ADS1263] Initial GPIO direction setting.\n");
 	}
 	uint8_t GIOPinsDirection = 0;
-	bitWrite(GIOPinsToActive,3,false);
-	bitWrite(GIOPinsToActive,5,false);
-	bitWrite(GIOPinsToActive,6,false);
 	SetGPIODirection(GIOPinsDirection);
 	if (Verbose)
 	{
 		Serial.print("[ADS1263] Initial GPIO output setting.\n");
 	}
 	uint8_t GIOPinsOutput = 0;
-	bitWrite(GIOPinsOutput,3,false);
-	bitWrite(GIOPinsOutput,5,false);
-	bitWrite(GIOPinsOutput,6,false);
 	SetGPIOOutput(GIOPinsOutput);
 	return true;
 }
@@ -383,7 +386,6 @@ bool ADS1263::StopADC1()
 	if (UseStartPin)
 	{
 		digitalWrite(StartPin, LOW);
-		delayMicroseconds(3);
 		return true;
 	}
 	else
@@ -455,7 +457,7 @@ bool ADS1263::GetADC1Value(double* DataToGet)
 {
 	//int32 max value 2147483647
 	double GainAmplitude = (double)(1 << static_cast<uint8_t>(ADC1GainSetting));
-	*DataToGet =  (double)(ADC1Value) / (double)(2147483647) * GainAmplitude * ReferenceVoltage;
+	*DataToGet =  (double)(ADC1Value) * ReferenceVoltage / GainAmplitude / (double)(2147483647);
 	if (Verbose)
 	{
 		Serial.print("[ADS1263] ADC1V ");
@@ -476,6 +478,11 @@ bool ADS1263::GetADC1Busy(bool* DataToGet)
 bool ADS1263::GetADC2Busy(bool* DataToGet)
 {
 	*DataToGet = RunningADC2;
+	return true;
+}
+bool ADS1263::GetADCBusy(bool* DataToGet)
+{
+	*DataToGet = RunningADC1 || RunningADC1;
 	return true;
 }
 bool ADS1263::GetADC1Temperature(double* DataToGet)
@@ -1254,14 +1261,14 @@ bool ADS1263::GetADC2Configuration(ADC2ConfigurationRegister* RegisterToGet)
 	return Status;
 }
 //Set ADC multiplexer
-bool ADS1263::SetADC2Positive(InputMUXValue ValueToSet)
+bool ADS1263::SetADC2PositiveChannel(InputMUXValue ValueToSet)
 {
 	ADC2MultiplexerRegister RegisterToSet;
 	bool Status = GetADC2Multiplexer(&RegisterToSet);
 	RegisterToSet.PositiveChannel = ValueToSet;
 	return Status & SetADC2Multiplexer(&RegisterToSet);
 }
-bool ADS1263::SetADC2Negative(InputMUXValue ValueToSet)
+bool ADS1263::SetADC2NegativeChannel(InputMUXValue ValueToSet)
 {
 	ADC2MultiplexerRegister RegisterToSet;
 	bool Status = false;
@@ -1294,7 +1301,6 @@ bool ADS1263::GetADC2Multiplexer(ADC2MultiplexerRegister* RegisterToGet)
 	RegisterToGet->NegativeChannel = static_cast<InputMUXValue>(ReturnByte & NegativeChannelMask);
 	return Status;
 }
-//
 bool ADS1263::Send(OpCodesSimple OpCodeToSend)
 {
 	uint8_t ByteToSend = static_cast<uint8_t>(OpCodeToSend);
@@ -1423,4 +1429,8 @@ bool ADS1263::WriteRegister(uint8_t RegisterAddress, uint8_t* WriteData, uint8_t
 	{
 		return true;
 	}
+}
+SPISettings* ADS1263::GetSPISettings()
+{
+	return &ConnectionSettings;
 }
