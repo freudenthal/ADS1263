@@ -1,6 +1,7 @@
 #include <SPI.h>
 #include <ADS1263.h>
 
+const uint32_t SerialUSBSpeed = 250000;
 const uint8_t ADCSPICSPin = 2;
 
 bool EnableADC2 = false;
@@ -27,6 +28,7 @@ void ADC2Callback()
 
 void setup()
 {
+	Serial.begin(SerialUSBSpeed);
 	ADC.SetNewADC1Callback(ADC1Callback);
 	ADC.SetNewADC2Callback(ADC1Callback);
 	ADC.Begin(EnableADC2);
