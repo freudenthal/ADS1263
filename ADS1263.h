@@ -132,6 +132,7 @@ class ADS1263
 			SINC3 = 2,
 			SINC4 = 3,
 			FIR = 4,
+			Count = 5,
 		};
 		enum class Mode2RegMap : uint8_t
 		{
@@ -157,6 +158,7 @@ class ADS1263
 			SPS14400 = 13,
 			SPS19200 = 14,
 			SPS38400 = 15,
+			Count = 16,
 		};
 		enum class ADC1GainValue: uint8_t //Gain settigns for ADC1
 		{
@@ -424,6 +426,7 @@ class ADS1263
 		ADS1263(uint8_t InitCSSelectPin, uint8_t InitDataReadyPin, uint8_t InitStartPin);
 		//
 		bool Begin();
+		bool Begin(uint8_t InitADC2);
 		bool Check();
 		bool StartADC1();
 		bool StartADC2();
@@ -533,8 +536,8 @@ class ADS1263
 		bool SetADC2Configuration(ADC2ConfigurationRegister* RegisterToSet);
 		bool GetADC2Configuration(ADC2ConfigurationRegister* RegisterToGet);
 		//Set ADC multiplexer
-		bool SetADC2Positive(InputMUXValue ValueToSet);
-		bool SetADC2Negative(InputMUXValue ValueToSet);
+		bool SetADC2PositiveChannel(InputMUXValue ValueToSet);
+		bool SetADC2NegativeChannel(InputMUXValue ValueToSet);
 		bool SetADC2Multiplexer(InputMUXValue PositiveChannelToSet, InputMUXValue NegativeChannelToSet);
 		bool SetADC2Multiplexer(ADC2MultiplexerRegister* RegisterToSet);
 		bool GetADC2Multiplexer(ADC2MultiplexerRegister* RegisterToGet);
@@ -553,6 +556,9 @@ class ADS1263
 		bool GetADC2Temperature(double* DataToGet);
 		bool GetADC1Busy(bool* DataToGet);
 		bool GetADC2Busy(bool* DataToGet);
+		bool GetADCBusy(bool* DataToGet);
+		//
+		SPISettings* GetSPISettings();
 	private:
 		const uint8_t ReturnDataSize = 6;
 		const uint8_t CheckSumConstant = 0x9B;
