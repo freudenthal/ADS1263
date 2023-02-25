@@ -244,7 +244,7 @@ class ADS1263
 			EXTAIN01 = 1, //External, use AIN0 for positive, AIN1 for negative
 			EXTAIN23 = 2, //External, use AIN2 for positive, AIN3 for negative
 			EXTAIN45 = 3, //External, use AIN4 for positive, AIN5 for negative
-			ANALOG = 4, //Internal analog supply, either positive or negative (Vavdd or Vavss)
+			ANALOGSUPPLY = 4, //Internal analog supply, either positive or negative (Vavdd or Vavss)
 		};
 		enum class TDACPNRegMap : uint8_t //Registry map for TDACP and TCACN
 		{
